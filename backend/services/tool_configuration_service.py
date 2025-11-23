@@ -469,7 +469,41 @@ async def _call_mcp_tool(
             name=tool_name,
             arguments=inputs
         )
-        return result.content[0].text
+        
+        # 增强结果处理，避免索引越界错误
+        try:
+            # 检查结果是否为空
+            if not result.content:
+                return {
+                    "status": "error",
+                    "error": "Tool returned empty result"
+                }
+            
+            # 安全地获取结果内容
+            if hasattr(result.content[0], 'text'):
+                text_result = result.content[0].text
+                # 尝试解析为JSON，如果失败则返回原始文本
+                try:
+                    import json
+                    return json.loads(text_result)
+                except json.JSONDecodeError:
+                    # 如果不是JSON格式，返回结构化结果
+                    return {
+                        "status": "success",
+                        "data": text_result
+                    }
+            else:
+                return {
+                    "status": "success",
+                    "data": str(result.content[0]) if result.content else "No content"
+                }
+        except (IndexError, AttributeError) as e:
+            logger.error(f"Error processing tool result: {e}")
+            return {
+                "status": "error",
+                "error": f"Failed to process tool result: {str(e)}",
+                "raw_result": str(result) if 'result' in locals() else "No result"
+            }
 
 
 async def _validate_mcp_tool_nexent(
