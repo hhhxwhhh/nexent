@@ -13,6 +13,7 @@ logger = logging.getLogger("nexent_app")
 # Global instance of NexentClientService
 nexent_service = NexentClientService()
 
+# Request and Response Models
 class QuestionRequest(BaseModel):
     question: str
 
@@ -35,6 +36,15 @@ class ModelSelectionResponse(BaseModel):
 
 class HealthCheckResponse(BaseModel):
     status: str
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
+class KnowledgeBaseCreateRequest(BaseModel):
+    knowledge_base_name: str
+
+class KnowledgeBaseCreateResponse(BaseModel):
+    success: bool
+    knowledge_base_id: Optional[int] = None
     message: str
 
 @router.on_event("startup")
@@ -59,7 +69,10 @@ async def initialize_nexent_client():
         logger.error(f"Failed to initialize Nexent client: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to initialize Nexent client")
 
-@router.post("/ask", response_model=AnswerResponse)
+# Core Question Answering Endpoints
+@router.post("/ask", response_model=AnswerResponse, 
+             summary="Ask a pathology-related question",
+             description="Submit a pathology-related question to the intelligent agent for analysis and response.")
 async def ask_pathology_question(request: QuestionRequest):
     """Ask a pathology-related question"""
     try:
@@ -69,7 +82,10 @@ async def ask_pathology_question(request: QuestionRequest):
         logger.error(f"Error processing question: {str(e)}")
         raise HTTPException(status_code=500, detail="Error processing question")
 
-@router.post("/analyze_image", response_model=ImageAnalysisResponse)
+# Medical Image Analysis Endpoints
+@router.post("/analyze_image", response_model=ImageAnalysisResponse,
+             summary="Analyze a medical image",
+             description="Submit a base64-encoded medical image for analysis by the local vision-language model.")
 async def analyze_medical_image(request: ImageAnalysisRequest):
     """Analyze a medical image using the local VL model"""
     try:
@@ -79,7 +95,9 @@ async def analyze_medical_image(request: ImageAnalysisRequest):
         logger.error(f"Error analyzing medical image: {str(e)}")
         raise HTTPException(status_code=500, detail="Error analyzing medical image")
 
-@router.post("/upload_image")
+@router.post("/upload_image",
+             summary="Upload and analyze a medical image",
+             description="Upload a medical image file and automatically analyze it with the vision-language model.")
 async def upload_and_analyze_image(
     file: UploadFile = File(...),
     task: str = "Please describe this medical image"
@@ -104,7 +122,10 @@ async def upload_and_analyze_image(
         logger.error(f"Error uploading and analyzing image: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
 
-@router.get("/health", response_model=HealthCheckResponse)
+# System Health and Management Endpoints
+@router.get("/health", response_model=HealthCheckResponse,
+            summary="Check service health",
+            description="Perform a health check on the Nexent service and its connections to backend systems.")
 async def health_check():
     """Check the health status of the Nexent service"""
     try:
@@ -123,7 +144,9 @@ async def health_check():
         logger.error(f"Error during health check: {str(e)}")
         raise HTTPException(status_code=500, detail="Error during health check")
 
-@router.post("/select_model", response_model=ModelSelectionResponse)
+@router.post("/select_model", response_model=ModelSelectionResponse,
+             summary="Select a model",
+             description="Choose and configure a specific model for use in subsequent operations.")
 async def select_model(request: ModelSelectionRequest):
     """Select and configure a specific model"""
     try:
@@ -142,7 +165,9 @@ async def select_model(request: ModelSelectionRequest):
         logger.error(f"Error selecting model: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error selecting model: {str(e)}")
 
-@router.get("/models")
+@router.get("/models",
+            summary="List available models",
+            description="Retrieve a list of models available from the ModelEngine service.")
 async def list_models():
     """List available models from ModelEngine"""
     try:
@@ -154,7 +179,10 @@ async def list_models():
         logger.error(f"Error listing models: {str(e)}")
         raise HTTPException(status_code=500, detail="Error listing models")
 
-@router.post("/documents/upload")
+# Knowledge Base Management Endpoints
+@router.post("/documents/upload",
+             summary="Upload pathology documents",
+             description="Upload pathology documents to create a new knowledge base for enhanced question answering.")
 async def upload_documents(
     files: List[UploadFile] = File(...),
     knowledge_base_name: str = "default_knowledge_base"
@@ -170,7 +198,9 @@ async def upload_documents(
         logger.error(f"Error uploading documents: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error uploading documents: {str(e)}")
 
-@router.post("/knowledge_base/mount")
+@router.post("/knowledge_base/mount",
+             summary="Mount a knowledge base",
+             description="Attach a knowledge base to the current pathology QA model to enhance its capabilities.")
 async def mount_knowledge_base(knowledge_base_id: int):
     """Mount a knowledge base to the current pathology QA model"""
     try:
