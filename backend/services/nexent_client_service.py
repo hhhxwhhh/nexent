@@ -67,7 +67,7 @@ class NexentClientService:
             raise RuntimeError("Nexent client not initialized. Call initialize_nexent_client first.")
         
         # Create observer for the agent
-        observer = MessageObserver(process_type=ProcessType.AGENT_RUN)
+        observer = MessageObserver()
         
         # Create stop event
         stop_event = Event()
