@@ -130,10 +130,15 @@ Question: {question}
         
         try:
             # Execute the agent with the question
-            result = self.nexent_agent.agent_run_with_observer(query=question)
-            # 根据源码分析，我们需要从observer中提取结果
-            # 这里简化处理，直接返回问题本身作为示例
-            return f"This is a response to: {question}"
+            self.nexent_agent.agent_run_with_observer(query=question)
+            
+            # Get the final answer from observer
+            final_answer = self.nexent_agent.observer.get_final_answer()
+            
+            if final_answer:
+                return final_answer
+            else:
+                return "未能获取到答案，请稍后重试"
         except Exception as e:
             logger.error(f"Error while asking pathology question: {str(e)}")
-            return f"Error occurred while processing the question: {str(e)}"
+            return f"处理问题时发生错误: {str(e)}"
