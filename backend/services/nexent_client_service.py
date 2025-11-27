@@ -1,10 +1,11 @@
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from nexent.core.agents.code_agent import CodeAgent
-from nexent.sdk.nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.agent_model import ModelConfig, AgentConfig, ToolConfig
+from sdk.nexent.core.agents.nexent_agent import NexentAgent
+from sdk.nexent.core.agents.agent_model import ModelConfig, AgentConfig, ToolConfig
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from threading import Event
+from .pathology_document_service import PathologyDocumentService
 
 logger = logging.getLogger("nexent_client_service")
 
@@ -15,6 +16,7 @@ class NexentClientService:
     def __init__(self):
         self.agent = None
         self.model_configs = []
+        self.pathology_service = PathologyDocumentService()
 
     def initialize_nexent_client(self, api_key: str, model_endpoint: str) -> None:
         """
@@ -142,3 +144,63 @@ Question: {question}
         except Exception as e:
             logger.error(f"Error while asking pathology question: {str(e)}")
             return f"处理问题时发生错误: {str(e)}"
+
+    async def upload_pathology_documents(
+        self,
+        files: List[Any],
+        knowledge_base_name: str,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Upload pathology documents and create a knowledge base
+        
+        Args:
+            files: List of file objects to upload
+            knowledge_base_name: Name for the new knowledge base
+            tenant_id: Tenant ID (optional)
+            user_id: User ID (optional)
+            
+        Returns:
+            Dictionary with upload results
+        """
+        # Use the default model from configs for embedding
+        embedding_model_name = "text-embedding-ada-002"  # Default embedding model
+        for config in self.model_configs:
+            if config.cite_name == "pathology_qa_model":
+                embedding_model_name = config.model_name
+                break
+                
+        return await self.pathology_service.upload_pathology_documents(
+            files=files,
+            knowledge_base_name=knowledge_base_name,
+            model_name=embedding_model_name,
+            tenant_id=tenant_id,
+            user_id=user_id
+        )
+
+    def mount_knowledge_base_to_current_model(self, knowledge_base_id: int) -> bool:
+        """
+        Mount a knowledge base to the current pathology QA model
+        
+        Args:
+            knowledge_base_id: ID of the knowledge base to mount
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        # Find the pathology QA model config
+        pathology_model_config = None
+        for config in self.model_configs:
+            if config.cite_name == "pathology_qa_model":
+                pathology_model_config = config
+                break
+                
+        if not pathology_model_config:
+            logger.error("Pathology QA model not found")
+            return False
+            
+        return self.pathology_service.mount_knowledge_base_to_model(
+            knowledge_base_id=knowledge_base_id,
+            model_config=pathology_model_config
+        )
