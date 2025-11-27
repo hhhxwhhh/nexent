@@ -21,6 +21,8 @@ from apps.tenant_config_app import router as tenant_config_router
 from apps.tool_config_app import router as tool_config_router
 from apps.user_management_app import router as user_management_router
 from apps.voice_app import router as voice_router
+from apps.nexent_app import router as nexent_router
+
 from consts.const import IS_SPEED_MODE
 
 # Import monitoring utilities
@@ -50,6 +52,7 @@ app.include_router(voice_router)
 app.include_router(file_manager_router)
 app.include_router(proxy_router)
 app.include_router(tool_config_router)
+app.include_router(nexent_router)
 
 # Choose user management router based on IS_SPEED_MODE
 if IS_SPEED_MODE:
