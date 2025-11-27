@@ -52,6 +52,31 @@ class NexentClientService:
         self.model_configs.append(pathology_model_config)
         logger.info("Nexent client initialized with model config")
 
+    def initialize_local_vl_model(self, model_path: str = None) -> None:
+        """
+        Initialize the local vision-language model (Qwen2.5-VL)
+        
+        Args:
+            model_path: Path to the downloaded Qwen2.5-VL model
+        """
+        logger.info("Initializing local vision-language model")
+        
+        if not model_path:
+            model_path = "/Users/wang/model_engine/Qwen2.5-VL-7B-Instruct"
+        
+        # Create model configuration for local VL model
+        vl_model_config = ModelConfig(
+            cite_name="local_vl_model",
+            api_key="",  # Local model doesn't need API key
+            model_name="qwen2.5-vl-7b-instruct",  # Model identifier
+            url=f"local://{model_path}",  # Special URL scheme for local models
+            temperature=0.1,
+            top_p=0.9
+        )
+        
+        self.model_configs.append(vl_model_config)
+        logger.info(f"Local VL model initialized with path: {model_path}")
+
     def check_model_engine_connectivity(self) -> bool:
         """
         Check connectivity to ModelEngine platform
@@ -114,6 +139,42 @@ class NexentClientService:
         except Exception as e:
             logger.error(f"Failed to get models from ModelEngine: {str(e)}")
             return []
+            
+    def list_available_models(self) -> List[Dict[str, Any]]:
+        """
+        Synchronously list available models from ModelEngine
+        
+        Returns:
+            List of available models
+        """
+        try:
+            import aiohttp
+            import asyncio
+            
+            async def _get_models():
+                headers = {'Authorization': f'Bearer {self.model_engine_apikey}'}
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"{self.model_engine_host}/open/router/v1/models", headers=headers) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            return data.get('data', [])
+                        else:
+                            logger.error(f"Failed to get models: {response.status}")
+                            return []
+            
+            # Run the async function in a new event loop if needed
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+            result = loop.run_until_complete(_get_models())
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get models from ModelEngine: {str(e)}")
+            return []
+
     def select_model(self, model_name: str) -> bool:
         """
         Select and configure a specific model from ModelEngine
@@ -154,8 +215,6 @@ class NexentClientService:
         except Exception as e:
             logger.error(f"Failed to select model {model_name}: {str(e)}")
             return False
-
-
 
     def attach_pathology_model(self, model_name: Optional[str] = None) -> None:
         """
@@ -231,6 +290,72 @@ Question: {question}
         
         logger.info("Pathology QA agent setup completed")
 
+    def setup_vl_agent(self) -> None:
+        """
+        Setup the vision-language agent with appropriate prompt template for image analysis
+        """
+        if not self.model_configs:
+            raise RuntimeError("Nexent client not initialized. Call initialize_nexent_client first.")
+        
+        # Create observer for the agent
+        observer = MessageObserver()
+        
+        # Create stop event
+        stop_event = Event()
+        
+        # Define prompt template for VL tasks
+        prompt_templates = {
+            "default": """
+You are a professional medical imaging expert. Please analyze the provided medical image and provide a detailed description.
+Requirements:
+1. Describe the image content accurately
+2. Identify any abnormalities or notable features
+3. Provide relevant medical insights
+4. If you're unsure, please indicate so honestly
+
+Image Analysis Task: {task}
+"""
+        }
+        
+        # Create tool configurations for VL tasks
+        tool_configs: List[ToolConfig] = [
+            ToolConfig(
+                class_name="MedicalImageAnalysisTool",
+                name="medical_image_analysis",
+                description="Analyze medical images and provide diagnostic suggestions",
+                inputs="image_data: str, image_format: str, analysis_type: str",
+                output_type="dict",
+                params={},
+                source="local",
+                usage=None
+            )
+        ]
+        
+        # Create agent configuration
+        agent_config = AgentConfig(
+            name="VisionLanguage_Agent",
+            description="Professional vision-language agent for medical image analysis",
+            prompt_templates=prompt_templates,
+            tools=tool_configs,
+            max_steps=5,
+            model_name="local_vl_model",  # Use the local VL model
+            provide_run_summary=False,
+            managed_agents=[]
+        )
+        
+        # Create the agent
+        self.vl_agent = NexentAgent(
+            observer=observer,
+            model_config_list=self.model_configs,
+            stop_event=stop_event
+        )
+        
+        # Create the core agent using the configuration
+        core_agent = self.vl_agent.create_single_agent(agent_config)
+        self.vl_agent.set_agent(core_agent)
+        
+        logger.info("Vision-Language agent setup completed")
+
     def ask_pathology_question(self, question: str) -> str:
         """
         Ask a pathology-related question and get an answer
@@ -260,6 +385,38 @@ Question: {question}
         except Exception as e:
             logger.error(f"Error while asking pathology question: {str(e)}")
             return f"处理问题时发生错误: {str(e)}"
+
+    def analyze_medical_image(self, image_data: str, task: str = "Please describe this medical image") -> str:
+        """
+        Analyze a medical image using the local VL model
+        
+        Args:
+            image_data: Base64 encoded image data
+            task: Description of the analysis task
+            
+        Returns:
+            Analysis result from the model
+        """
+        if not hasattr(self, 'vl_agent') or not self.vl_agent.agent:
+            raise RuntimeError("VL Agent not initialized. Call setup_vl_agent first.")
+            
+        logger.info(f"Analyzing medical image with task: {task}")
+        
+        try:
+            # Execute the agent with the image and task
+            full_query = f"Image data: {image_data[:50]}... Task: {task}"  # Truncate image data for logging
+            self.vl_agent.agent_run_with_observer(query=full_query)
+            
+            # Get the final answer from observer
+            final_answer = self.vl_agent.observer.get_final_answer()
+            
+            if final_answer:
+                return final_answer
+            else:
+                return "未能获取到图像分析结果，请稍后重试"
+        except Exception as e:
+            logger.error(f"Error while analyzing medical image: {str(e)}")
+            return f"处理图像时发生错误: {str(e)}"
 
     async def upload_pathology_documents(
         self,
