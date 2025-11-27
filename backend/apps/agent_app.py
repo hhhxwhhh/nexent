@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import logging
+import os
 from services.nexent_client_service import NexentClientService
 
 router = APIRouter(prefix="/nexent", tags=["Nexent"])
@@ -19,9 +20,9 @@ class AnswerResponse(BaseModel):
 async def initialize_nexent_client():
     """Initialize Nexent client on application startup"""
     try:
-        # These values should come from environment variables in a production setup
-        api_key = "your-api-key"  # os.getenv("NEXENT_API_KEY")
-        model_endpoint = "https://nexent.modelengine.com/api/v1"  # os.getenv("NEXENT_MODEL_ENDPOINT")
+        # 从环境变量获取值
+        api_key = os.getenv("NEXENT_API_KEY", "your-api-key")
+        model_endpoint = os.getenv("NEXENT_MODEL_ENDPOINT", "https://nexent.modelengine.com/api/v1")
         
         nexent_service.initialize_nexent_client(api_key, model_endpoint)
         nexent_service.attach_pathology_model()

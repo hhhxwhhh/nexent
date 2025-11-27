@@ -19,6 +19,8 @@ class NexentClientService:
         self.agent = None
         self.model_configs = []
         self.pathology_service = PathologyDocumentService()
+        self.model_engine_host = MODEL_ENGINE_HOST
+        self.model_engine_apikey = MODEL_ENGINE_APIKEY
 
     def initialize_nexent_client(self, api_key: str = None, model_endpoint: str = None) -> None:
         """
@@ -61,10 +63,15 @@ class NexentClientService:
             import aiohttp
             import asyncio
             
+            # 检查必要的配置是否存在
+            if not self.model_engine_apikey or not self.model_engine_host:
+                logger.error("ModelEngine API key or host not configured")
+                return False
+            
             async def _check_connectivity():
                 headers = {'Authorization': f'Bearer {self.model_engine_apikey}'}
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(f"{self.model_engine_host}/open/router/v1/models", headers=headers) as response:
+                    async with session.get(f"{self.model_engine_host}/open/router/v1/health", headers=headers) as response:
                         return response.status == 200
             
             # Run the async function in a new event loop if needed
@@ -75,46 +82,79 @@ class NexentClientService:
                 asyncio.set_event_loop(loop)
                 
             result = loop.run_until_complete(_check_connectivity())
+            if result:
+                logger.info("Successfully connected to ModelEngine")
+            else:
+                logger.warning("Failed to connect to ModelEngine")
             return result
         except Exception as e:
             logger.error(f"Failed to check ModelEngine connectivity: {str(e)}")
             return False
+
         
-    def list_available_models(self) -> List[Dict[str, Any]]:
+    async def list_available_models_async(self) -> List[Dict[str, Any]]:
         """
-        List available models from ModelEngine
+        Asynchronously list available models from ModelEngine
         
         Returns:
             List of available models
         """
         try:
             import aiohttp
-            import asyncio
-            import json
             
-            async def _get_models():
-                headers = {'Authorization': f'Bearer {self.model_engine_apikey}'}
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(f"{self.model_engine_host}/open/router/v1/models", headers=headers) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            return data.get('data', [])
-                        else:
-                            logger.error(f"Failed to get models: {response.status}")
-                            return []
-            
-            # Run the async function in a new event loop if needed
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-            result = loop.run_until_complete(_get_models())
-            return result
+            headers = {'Authorization': f'Bearer {self.model_engine_apikey}'}
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{self.model_engine_host}/open/router/v1/models", headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data.get('data', [])
+                    else:
+                        logger.error(f"Failed to get models: {response.status}")
+                        return []
         except Exception as e:
             logger.error(f"Failed to get models from ModelEngine: {str(e)}")
             return []
+    def select_model(self, model_name: str) -> bool:
+        """
+        Select and configure a specific model from ModelEngine
+        
+        Args:
+            model_name: Name of the model to select
+            
+        Returns:
+            bool: True if model selection successful, False otherwise
+        """
+        try:
+            # 获取可用模型列表
+            available_models = self.list_available_models()
+            
+            # 查找指定的模型
+            selected_model = None
+            for model in available_models:
+                if model.get('name') == model_name:
+                    selected_model = model
+                    break
+            
+            if not selected_model:
+                logger.error(f"Model {model_name} not found in available models")
+                return False
+            
+            # 更新模型配置
+            for config in self.model_configs:
+                if config.cite_name == "pathology_qa_model":
+                    config.model_name = model_name
+                    # 可以根据模型类型设置其他参数
+                    if selected_model.get('type') == 'chat':
+                        config.temperature = 0.7
+                        config.top_p = 0.9
+                    break
+                    
+            logger.info(f"Selected model: {model_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to select model {model_name}: {str(e)}")
+            return False
+
 
 
     def attach_pathology_model(self, model_name: Optional[str] = None) -> None:
