@@ -9,6 +9,8 @@ from .pathology_document_service import PathologyDocumentService
 
 logger = logging.getLogger("nexent_client_service")
 
+from consts.const import MODEL_ENGINE_HOST, MODEL_ENGINE_APIKEY
+
 
 class NexentClientService:
     """Service for initializing and managing Nexent client and models"""
@@ -18,28 +20,102 @@ class NexentClientService:
         self.model_configs = []
         self.pathology_service = PathologyDocumentService()
 
-    def initialize_nexent_client(self, api_key: str, model_endpoint: str) -> None:
+    def initialize_nexent_client(self, api_key: str = None, model_endpoint: str = None) -> None:
         """
         Initialize the Nexent client with basic configuration
         
         Args:
-            api_key: API key for accessing the model
-            model_endpoint: Endpoint URL for the model service
+            api_key: API key for accessing the model (defaults to env var)
+            model_endpoint: Endpoint URL for the model service (defaults to env var)
         """
         logger.info("Initializing Nexent client")
+        
+        # 使用传入的参数或环境变量
+        actual_api_key = api_key or self.model_engine_apikey
+        actual_model_endpoint = model_endpoint or self.model_engine_host
+        
+        if not actual_api_key or not actual_model_endpoint:
+            raise ValueError("API key and model endpoint must be provided either as arguments or environment variables")
         
         # Create model configuration for pathology QA model
         pathology_model_config = ModelConfig(
             cite_name="pathology_qa_model",
-            api_key=api_key,
+            api_key=actual_api_key,
             model_name="gpt-3.5-turbo",  # Default model, can be changed
-            url=model_endpoint,
+            url=actual_model_endpoint,
             temperature=0.2,
             top_p=0.95
         )
         
         self.model_configs.append(pathology_model_config)
         logger.info("Nexent client initialized with model config")
+
+    def check_model_engine_connectivity(self) -> bool:
+        """
+        Check connectivity to ModelEngine platform
+        
+        Returns:
+            bool: True if connected, False otherwise
+        """
+        try:
+            import aiohttp
+            import asyncio
+            
+            async def _check_connectivity():
+                headers = {'Authorization': f'Bearer {self.model_engine_apikey}'}
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"{self.model_engine_host}/open/router/v1/models", headers=headers) as response:
+                        return response.status == 200
+            
+            # Run the async function in a new event loop if needed
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+            result = loop.run_until_complete(_check_connectivity())
+            return result
+        except Exception as e:
+            logger.error(f"Failed to check ModelEngine connectivity: {str(e)}")
+            return False
+        
+    def list_available_models(self) -> List[Dict[str, Any]]:
+        """
+        List available models from ModelEngine
+        
+        Returns:
+            List of available models
+        """
+        try:
+            import aiohttp
+            import asyncio
+            import json
+            
+            async def _get_models():
+                headers = {'Authorization': f'Bearer {self.model_engine_apikey}'}
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"{self.model_engine_host}/open/router/v1/models", headers=headers) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            return data.get('data', [])
+                        else:
+                            logger.error(f"Failed to get models: {response.status}")
+                            return []
+            
+            # Run the async function in a new event loop if needed
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+            result = loop.run_until_complete(_get_models())
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get models from ModelEngine: {str(e)}")
+            return []
+
 
     def attach_pathology_model(self, model_name: Optional[str] = None) -> None:
         """
