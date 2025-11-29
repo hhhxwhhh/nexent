@@ -8,8 +8,8 @@ from typing import Optional
 
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from nexent.core.agents.run_agent import agent_run
-from nexent.memory.memory_service import clear_memory, add_memory_in_levels
+from sdk.nexent.core.agents.run_agent import agent_run
+from sdk.nexent.memory.memory_service import clear_memory, add_memory_in_levels
 
 from agents.agent_run_manager import agent_run_manager
 from agents.create_agent_info import create_agent_run_info, create_tool_config_list
