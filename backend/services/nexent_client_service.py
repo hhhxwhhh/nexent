@@ -417,8 +417,15 @@ Image Analysis Task: {task}
         logger.info(f"Asking pathology question: {question}")
         
         try:
-            # Execute the agent with the question
-            self.nexent_agent.agent_run_with_observer(query=question)
+            # Determine question complexity to choose appropriate prompt template
+            complexity = self._assess_question_complexity(question)
+            template_name = "complex_case" if complexity > 0.7 else "default"
+            
+            # Execute the agent with the question and appropriate template
+            self.nexent_agent.agent_run_with_observer(
+                query=question,
+                prompt_template_name=template_name
+            )
             
             # Get the final answer from observer
             final_answer = self.nexent_agent.observer.get_final_answer()
@@ -430,6 +437,30 @@ Image Analysis Task: {task}
         except Exception as e:
             logger.error(f"Error while asking pathology question: {str(e)}")
             return f"处理问题时发生错误: {str(e)}"
+        
+    def _assess_question_complexity(self, question: str) -> float:
+        """
+        Assess the complexity of a question to determine which prompt template to use
+        
+        Args:
+            question: The question to assess
+            
+        Returns:
+            Complexity score between 0 and 1
+        """
+        # Simple heuristic for question complexity
+        complex_keywords = ['分析', '诊断', '治疗方案', '鉴别诊断', '病理机制', '综合']
+        word_count = len(question.split())
+        
+        complexity_score = min(word_count / 20.0, 1.0)  # Normalize by length
+        
+        # Add complexity for keywords
+        for keyword in complex_keywords:
+            if keyword in question:
+                complexity_score += 0.2
+                
+        return min(complexity_score, 1.0)
+
 
     def analyze_medical_image(self, image_data: str, task: str = "Please describe this medical image") -> str:
         """
@@ -453,7 +484,7 @@ Image Analysis Task: {task}
             self.vl_agent.agent_run_with_observer(query=full_query)
             
             # Get the final answer from observer
-            final_answer = self.vl_agent.observer.get_final_answer()
+            final_answer = self.vl_agent.observer .get_final_answer()
             
             if final_answer:
                 return final_answer
@@ -469,7 +500,7 @@ Image Analysis Task: {task}
         knowledge_base_name: str,
         tenant_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        auto_summarize: bool = True  # 新增参数，支持自动摘要
+        auto_summarize: bool = True
     ) -> Dict[str, Any]:
         """
         Upload pathology documents and create a knowledge base
@@ -504,7 +535,7 @@ Image Analysis Task: {task}
             try:
                 kb_id = result["knowledge_base_id"]
                 # trigger auto summarization task (async execution)
-                await self.pathology_service.auto_summarize_knowledge_base(kb_id)
+                await self._retry_auto_summarize(kb_id)
                 result["auto_summarize_triggered"] = True
             except Exception as e:
                 logger.error(f"Failed to trigger auto summarization: {str(e)}")
@@ -512,6 +543,31 @@ Image Analysis Task: {task}
                 result["auto_summarize_error"] = str(e)
                 
         return result
+
+    async def _retry_auto_summarize(self, knowledge_base_id: int, max_retries: int = 3) -> None:
+        """
+        Retry auto summarization with exponential backoff
+        
+        Args:
+            knowledge_base_id: ID of the knowledge base to summarize
+            max_retries: Maximum number of retry attempts
+        """
+        import asyncio
+        
+        for attempt in range(max_retries):
+            try:
+                await self.pathology_service.auto_summarize_knowledge_base(knowledge_base_id)
+                logger.info(f"Auto summarization successful for KB {knowledge_base_id}")
+                return
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff
+                    logger.warning(f"Auto summarization failed (attempt {attempt + 1}), retrying in {wait_time}s: {str(e)}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Auto summarization failed after {max_retries} attempts: {str(e)}")
+                    raise
+
 
 
     def mount_knowledge_base_to_current_model(self, knowledge_base_id: int) -> bool:
