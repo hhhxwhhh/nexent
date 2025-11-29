@@ -595,3 +595,63 @@ Image Analysis Task: {task}
             knowledge_base_id=knowledge_base_id,
             model_config=pathology_model_config
         )
+    def mount_knowledge_base_to_agent(self, knowledge_base_id: int) -> bool:
+        """
+        Mount a knowledge base to the current pathology QA agent
+        
+        Args:
+            knowledge_base_id: ID of the knowledge base to mount
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # 获取知识库信息
+            from backend.database.knowledge_db import get_knowledge_info_by_knowledge_ids
+            knowledge_info_list = get_knowledge_info_by_knowledge_ids([str(knowledge_base_id)])
+            
+            if not knowledge_info_list:
+                logger.error(f"Knowledge base with ID {knowledge_base_id} not found")
+                return False
+                
+            knowledge_info = knowledge_info_list[0]
+            index_name = knowledge_info["index_name"]
+            
+            # 初始化ElasticSearchCore实例
+            from nexent.vector_database.elasticsearch_core import ElasticSearchCore
+            es_core = ElasticSearchCore(
+                host=self.model_engine_host,
+                api_key=self.model_engine_apikey
+            )
+            
+            # 创建新的工具配置
+            from sdk.nexent.core.agents.agent_model import ToolConfig
+            kb_tool_config = ToolConfig(
+                class_name="KnowledgeBaseSearchTool",
+                name="knowledge_base_search",
+                description="Performs a local knowledge base search based on your query",
+                inputs="query: str, search_mode: str = 'hybrid', index_names: List[str] = None",
+                output_type="string",
+                params={"top_k": 5},
+                source="local",
+                metadata={
+                    "index_names": [index_name],
+                    "es_core": es_core,
+                    "embedding_model": None  # 在实际应用中应提供具体的嵌入模型
+                }
+            )
+            
+            # 更新Agent的工具列表
+            if hasattr(self, 'nexent_agent') and self.nexent_agent.agent:
+                # 添加工具到现有Agent
+                kb_tool = self.nexent_agent.create_local_tool(kb_tool_config)
+                self.nexent_agent.agent.tools.append(kb_tool)
+                logger.info(f"Successfully mounted knowledge base {knowledge_base_id} to agent")
+                return True
+            else:
+                logger.error("Agent not initialized")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error mounting knowledge base to agent: {str(e)}")
+            return False
