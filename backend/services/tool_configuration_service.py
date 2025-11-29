@@ -774,7 +774,7 @@ async def register_custom_pathology_tool(
         tool_info = ToolInfo(
             name=tool_name,
             description=tool_description,
-            source=ToolSourceEnum.LOCAL,
+            source=ToolSourceEnum.LOCAL.value,
             function_ref=tool_function.__name__,
             tenant_id=tenant_id,
             creator_id=user_id
