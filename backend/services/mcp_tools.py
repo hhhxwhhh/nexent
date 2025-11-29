@@ -3,6 +3,7 @@ import base64
 from PIL import Image
 import io
 import numpy as np
+
 class PathologyImageAnalysisTool:
     """病理图片分析工具"""
     
@@ -39,6 +40,7 @@ class PathologyImageAnalysisTool:
             
         except Exception as e:
             return {"error": f"Image analysis failed: {str(e)}"}
+    
     def _diagnose_image(self, image_array: np.ndarray) -> Dict[str, Any]:
         """诊断图片"""
         # 模拟诊断逻辑
@@ -61,5 +63,37 @@ class PathologyImageAnalysisTool:
                 "建议定期复查",
                 "保持健康生活方式",
                 "必要时进行活检"
+            ]
+        }
+    
+    def _classify_image(self, image_array: np.ndarray) -> Dict[str, Any]:
+        """分类图片"""
+        # 模拟分类逻辑
+        class_names = ["正常组织", "炎症", "肿瘤", "坏死"]
+        probabilities = [0.1, 0.2, 0.6, 0.1]
+        
+        predicted_class = class_names[np.argmax(probabilities)]
+        
+        return {
+            "predicted_class": predicted_class,
+            "probabilities": dict(zip(class_names, probabilities)),
+            "confidence": max(probabilities)
+        }
+    
+    def _detect_abnormalities(self, image_array: np.ndarray) -> Dict[str, Any]:
+        """检测异常"""
+        # 模拟异常检测逻辑
+        abnormalities = [
+            {"type": "细胞核增大", "location": "左上角", "severity": "中度"},
+            {"type": "细胞排列紊乱", "location": "中心区域", "severity": "轻度"}
+        ]
+        
+        return {
+            "abnormalities_detected": len(abnormalities),
+            "abnormalities": abnormalities,
+            "suggestions": [
+                "建议进一步检查",
+                "考虑进行免疫组化染色",
+                "咨询专科医生"
             ]
         }

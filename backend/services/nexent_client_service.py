@@ -7,6 +7,8 @@ from nexent.core.utils.observer import MessageObserver, ProcessType
 from threading import Event
 from .pathology_document_service import PathologyDocumentService
 
+from .mcp_tools import PathologyImageAnalysisTool
+
 logger = logging.getLogger("nexent_client_service")
 
 from consts.const import MODEL_ENGINE_HOST, MODEL_ENGINE_APIKEY
@@ -272,8 +274,9 @@ You are an experienced pathology expert. Please analyze the following complex ca
 Case Details: {question}
 """
         }
+        pathology_image_tool = PathologyImageAnalysisTool()
         
-        # Create tool configurations with more advanced tools
+            # Create tool configurations with more advanced tools
         tool_configs: List[ToolConfig] = [
             ToolConfig(
                 class_name="PathologyDataAnalysisTool",
@@ -290,6 +293,16 @@ Case Details: {question}
                 name="literature_search",
                 description="Search latest medical literature for evidence-based answers",
                 inputs="query: str, limit: int = 5",
+                output_type="dict",
+                params={},
+                source="local",
+                usage=None
+            ),
+            ToolConfig(
+                class_name="PathologyImageAnalysisTool",
+                name="pathology_image_analysis",
+                description="Analyze pathology images and provide diagnostic suggestions",
+                inputs="image_data: str, analysis_type: str = 'diagnosis'",
                 output_type="dict",
                 params={},
                 source="local",
