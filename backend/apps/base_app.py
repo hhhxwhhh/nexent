@@ -32,6 +32,7 @@ from utils.monitoring import monitoring_manager
 logger = logging.getLogger("base_app")
 app = FastAPI(root_path="/api")
 
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
