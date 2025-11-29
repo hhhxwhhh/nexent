@@ -259,11 +259,43 @@ Requirements:
 3. If you're unsure, please indicate so honestly
 
 Question: {question}
+""",
+            "complex_case": """
+You are an experienced pathology expert. Please analyze the following complex case step by step:
+
+1. First, identify the key symptoms and clinical findings
+2. Consider differential diagnoses based on current medical literature
+3. Evaluate the likelihood of each potential diagnosis
+4. Recommend appropriate diagnostic tests if needed
+5. Suggest initial treatment approaches based on evidence-based medicine
+
+Case Details: {question}
 """
         }
         
-        # Create tool configurations (empty for now, can be extended)
-        tool_configs: List[ToolConfig] = []
+        # Create tool configurations with more advanced tools
+        tool_configs: List[ToolConfig] = [
+            ToolConfig(
+                class_name="PathologyDataAnalysisTool",
+                name="pathology_data_analysis",
+                description="Analyze pathology data and provide professional recommendations",
+                inputs="symptom: str, duration_days: int = 7",
+                output_type="dict",
+                params={},
+                source="local",
+                usage=None
+            ),
+            ToolConfig(
+                class_name="LiteratureSearchTool",
+                name="literature_search",
+                description="Search latest medical literature for evidence-based answers",
+                inputs="query: str, limit: int = 5",
+                output_type="dict",
+                params={},
+                source="local",
+                usage=None
+            )
+        ]
         
         # Create agent configuration
         agent_config = AgentConfig(
@@ -271,9 +303,9 @@ Question: {question}
             description="Professional pathology question answering agent",
             prompt_templates=prompt_templates,
             tools=tool_configs,
-            max_steps=5,
+            max_steps=10,  # Increase steps for complex cases
             model_name="pathology_qa_model",
-            provide_run_summary=False,
+            provide_run_summary=True,  # Enable summaries
             managed_agents=[]
         )
         
@@ -423,7 +455,8 @@ Image Analysis Task: {task}
         files: List[Any],
         knowledge_base_name: str,
         tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        auto_summarize: bool = True  # 新增参数，支持自动摘要
     ) -> Dict[str, Any]:
         """
         Upload pathology documents and create a knowledge base
@@ -433,6 +466,7 @@ Image Analysis Task: {task}
             knowledge_base_name: Name for the new knowledge base
             tenant_id: Tenant ID (optional)
             user_id: User ID (optional)
+            auto_summarize: Whether to automatically summarize documents (default: True)
             
         Returns:
             Dictionary with upload results
@@ -444,13 +478,28 @@ Image Analysis Task: {task}
                 embedding_model_name = config.model_name
                 break
                 
-        return await self.pathology_service.upload_pathology_documents(
+        result = await self.pathology_service.upload_pathology_documents(
             files=files,
             knowledge_base_name=knowledge_base_name,
             model_name=embedding_model_name,
             tenant_id=tenant_id,
             user_id=user_id
         )
+        
+        # if auto_summarize is True, trigger auto summarization
+        if auto_summarize and result.get("success") and result.get("knowledge_base_id"):
+            try:
+                kb_id = result["knowledge_base_id"]
+                # trigger auto summarization task (async execution)
+                await self.pathology_service.auto_summarize_knowledge_base(kb_id)
+                result["auto_summarize_triggered"] = True
+            except Exception as e:
+                logger.error(f"Failed to trigger auto summarization: {str(e)}")
+                result["auto_summarize_triggered"] = False
+                result["auto_summarize_error"] = str(e)
+                
+        return result
+
 
     def mount_knowledge_base_to_current_model(self, knowledge_base_id: int) -> bool:
         """
