@@ -25,6 +25,8 @@ from database.tool_db import (
 from database.user_tenant_db import get_all_tenant_ids
 from services.elasticsearch_service import get_embedding_model, elastic_core
 from services.tenant_config_service import get_selected_knowledge_list
+from database.client import as_dict
+
 
 logger = logging.getLogger("tool_configuration_service")
 
@@ -747,3 +749,103 @@ async def validate_tool_impl(
     except Exception as e:
         logger.error(f"Validate Tool failed: {e}")
         raise ToolExecutionException(str(e))
+async def register_custom_pathology_tool(
+    tool_name: str,
+    tool_description: str,
+    tool_function: callable,
+    tenant_id: str,
+    user_id: str
+) -> dict:
+    """
+    注册自定义病理学工具
+    
+    Args:
+        tool_name: 工具名称
+        tool_description: 工具描述
+        tool_function: 工具函数
+        tenant_id: 租户ID
+        user_id: 用户ID
+        
+    Returns:
+        dict: 注册结果
+    """
+    try:
+        # 创建工具信息
+        tool_info = ToolInfo(
+            name=tool_name,
+            description=tool_description,
+            source=ToolSourceEnum.LOCAL,
+            function_ref=tool_function.__name__,
+            tenant_id=tenant_id,
+            creator_id=user_id
+        )
+        
+        # 保存到数据库
+        created_tool = create_or_update_tool_by_tool_info(
+            tool_info=as_dict(tool_info),
+            tenant_id=tenant_id,
+            user_id=user_id
+        )
+        
+        logger.info(f"Custom pathology tool registered: {tool_name}")
+        
+        return {
+            "status": "success",
+            "tool_id": created_tool.id,
+            "message": f"Tool '{tool_name}' registered successfully"
+        }
+    except Exception as e:
+        logger.error(f"Failed to register custom pathology tool {tool_name}: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+async def search_pathology_tools(
+    query: str,
+    tenant_id: str,
+    limit: int = 10
+) -> List[Dict[str, Any]]:
+    """
+    搜索病理学相关工具
+    
+    Args:
+        query: 搜索查询
+        tenant_id: 租户ID
+        limit: 结果限制
+        
+    Returns:
+        List[Dict[str, Any]]: 工具列表
+    """
+    try:
+        # 从数据库查询工具
+        all_tools = query_all_tools(tenant_id=tenant_id)
+        
+        # 根据查询词过滤工具
+        filtered_tools = []
+        query_lower = query.lower()
+        
+        for tool in all_tools:
+            # 检查工具名称、描述是否匹配查询词
+            if (query_lower in tool.name.lower() or 
+                query_lower in tool.description.lower() or
+                query_lower in getattr(tool, 'category', '').lower()):
+                
+                filtered_tools.append({
+                    'id': tool.id,
+                    'name': tool.name,
+                    'description': tool.description,
+                    'source': tool.source,
+                    'category': getattr(tool, 'category', 'general'),
+                    'created_at': tool.created_at.isoformat() if hasattr(tool, 'created_at') else None
+                })
+                
+                # 限制结果数量
+                if len(filtered_tools) >= limit:
+                    break
+        
+        return filtered_tools
+    except Exception as e:
+        logger.error(f"Failed to search pathology tools: {str(e)}")
+        return []
