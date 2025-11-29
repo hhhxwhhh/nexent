@@ -87,3 +87,94 @@ async def check_mcp_health_and_update_db(mcp_url, service_name, tenant_id, user_
         status=status)
     if not status:
         raise MCPConnectionError("MCP connection failed")
+
+
+async def get_tool_from_remote_mcp_server(mcp_server_name: str, remote_mcp_server: str) -> dict:
+    """
+    从远程MCP服务器获取工具信息
+    
+    Args:
+        mcp_server_name: MCP服务器名称
+        remote_mcp_server: 远程MCP服务器地址
+        
+    Returns:
+        dict: 工具信息字典
+    """
+    try:
+        # 创建MCP客户端
+        client = Client(remote_mcp_server)
+        async with client:
+            # 获取工具列表
+            tools = await client.list_tools()
+            
+            # 获取每个工具的详细信息
+            tool_details = []
+            for tool in tools:
+                try:
+                    # 获取工具详细信息
+                    tool_detail = await client.get_tool(tool.name)
+                    tool_details.append({
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.input_schema,
+                        "output_schema": getattr(tool, 'output_schema', None)
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to get details for tool {tool.name}: {str(e)}")
+                    # 即使某个工具详情获取失败，也保留基本信息
+                    tool_details.append({
+                        "name": tool.name,
+                        "description": tool.description,
+                        "error": str(e)
+                    })
+            
+            return {
+                "status": "success",
+                "mcp_server": mcp_server_name,
+                "tools_count": len(tool_details),
+                "tools": tool_details
+            }
+    except Exception as e:
+        logger.error(f"Failed to get tools from remote MCP server {remote_mcp_server}: {str(e)}")
+        raise MCPConnectionError(f"Failed to connect to MCP server: {str(e)}")
+    
+
+async def execute_tool_on_remote_mcp_server(
+    mcp_server_name: str, 
+    remote_mcp_server: str,
+    tool_name: str,
+    tool_params: dict
+) -> dict:
+    """
+    在远程MCP服务器上执行工具
+    
+    Args:
+        mcp_server_name: MCP服务器名称
+        remote_mcp_server: 远程MCP服务器地址
+        tool_name: 工具名称
+        tool_params: 工具参数
+        
+    Returns:
+        dict: 执行结果
+    """
+    try:
+        # 创建MCP客户端
+        client = Client(remote_mcp_server)
+        async with client:
+            # 执行工具
+            result = await client.call_tool(tool_name, tool_params)
+            
+            return {
+                "status": "success",
+                "mcp_server": mcp_server_name,
+                "tool_name": tool_name,
+                "result": result
+            }
+    except Exception as e:
+        logger.error(f"Failed to execute tool {tool_name} on remote MCP server {remote_mcp_server}: {str(e)}")
+        return {
+            "status": "error",
+            "mcp_server": mcp_server_name,
+            "tool_name": tool_name,
+            "error": str(e)
+        }
