@@ -4,6 +4,7 @@ import logging
 import os
 import base64
 from typing import List, Optional, Dict, Any,Form
+from backend.services.mcp_tools import PathologyImageAnalysisTool
 
 from services.nexent_client_service import NexentClientService
 
@@ -244,22 +245,19 @@ async def mount_knowledge_base(knowledge_base_id: int):
 async def analyze_pathology_image(request: PathologyImageAnalysisRequest):
     """Analyze a pathology image using MCP tools"""
     try:
-        # 这里我们直接调用服务中的方法，但在真实情况下应该调用MCP工具
-        # 由于MCP工具集成在agent中，我们可以模拟调用
-        result = {
-            "diagnosis": "良性肿瘤",
-            "confidence": 0.85,
-            "features": {
-                "mean_intensity": 128.5,
-                "std_intensity": 45.2,
-                "image_shape": "(512, 512, 3)"
-            },
-            "recommendations": [
-                "建议定期复查",
-                "保持健康生活方式",
-                "必要时进行活检"
-            ]
-        }
+        # 实际调用MCP工具进行图像分析
+        pathology_image_tool = PathologyImageAnalysisTool()
+        result = pathology_image_tool.analyze_image(
+            image_data=request.image_data,
+            analysis_type=request.analysis_type
+        )
+        
+        # 检查分析结果是否成功
+        if "error" in result:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Image analysis failed: {result['error']}"
+            )
         
         return PathologyImageAnalysisResponse(
             success=True,
@@ -269,7 +267,6 @@ async def analyze_pathology_image(request: PathologyImageAnalysisRequest):
     except Exception as e:
         logger.error(f"Error analyzing pathology image: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error analyzing pathology image: {str(e)}")
-
 @router.post("/upload_pathology_image",
              summary="Upload and analyze a pathology image",
              description="Upload a pathology image file and automatically analyze it with MCP tools.")
@@ -279,34 +276,49 @@ async def upload_and_analyze_pathology_image(
 ):
     """Upload and analyze a pathology image"""
     try:
+        # Validate file type
+        if not file.content_type.startswith("image/"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Expected image, got {file.content_type}"
+            )
+        
         # Read image file
         contents = await file.read()
+        
+        # Check file size (limit to 10MB)
+        if len(contents) > 10 * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail="File too large. Maximum size is 10MB"
+            )
         
         # Convert to base64
         image_data = base64.b64encode(contents).decode('utf-8')
         
-        # Analyze the image
-        result = {
-            "diagnosis": "良性肿瘤",
-            "confidence": 0.85,
-            "features": {
-                "mean_intensity": 128.5,
-                "std_intensity": 45.2,
-                "image_shape": "(512, 512, 3)"
-            },
-            "recommendations": [
-                "建议定期复查",
-                "保持健康生活方式",
-                "必要时进行活检"
-            ]
-        }
+        # Analyze the image using MCP tool
+        pathology_image_tool = PathologyImageAnalysisTool()
+        result = pathology_image_tool.analyze_image(
+            image_data=image_data,
+            analysis_type=analysis_type
+        )
+        
+        # Check analysis result
+        if "error" in result:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Image analysis failed: {result['error']}"
+            )
         
         return {
+            "success": True,
             "filename": file.filename,
             "content_type": file.content_type,
             "analysis_result": result,
             "analysis_type": analysis_type
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error uploading and analyzing pathology image: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
@@ -317,19 +329,44 @@ async def upload_and_analyze_pathology_image(
 async def ask_question_with_image(request: QuestionWithImageRequest):
     """Ask a pathology question with image context"""
     try:
-        # Combine image analysis with question answering
-        image_analysis = {
-            "diagnosis": "良性肿瘤",
-            "confidence": 0.85
-        }
+        # First analyze the image
+        pathology_image_tool = PathologyImageAnalysisTool()
+        image_analysis = pathology_image_tool.analyze_image(
+            image_data=request.image_data,
+            analysis_type="diagnosis"
+        )
         
-        # Simulate combined analysis
-        combined_response = f"基于图像分析结果({image_analysis['diagnosis']}，置信度{image_analysis['confidence']})，回答您的问题：{request.question}"
+        # Check image analysis result
+        if "error" in image_analysis:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Image analysis failed: {image_analysis['error']}"
+            )
+        
+        # Format image analysis results for the question
+        formatted_image_info = f"""
+图像分析结果:
+- 诊断: {image_analysis.get('diagnosis', 'N/A')}
+- 置信度: {image_analysis.get('confidence', 'N/A')}
+- 图像特征: {image_analysis.get('features', 'N/A')}
+"""
+        
+        # Combine image analysis with question and ask the agent
+        combined_question = f"""
+{formatted_image_info}
+
+用户问题: {request.question}
+"""
+        
+        # Ask the pathology QA agent with the combined context
+        answer = nexent_service.ask_pathology_question(combined_question)
         
         return QuestionWithImageResponse(
             success=True,
-            result=combined_response
+            result=answer
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error processing question with image: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing question with image: {str(e)}")
