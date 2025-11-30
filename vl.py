@@ -4,7 +4,7 @@ from vllm import LLM, SamplingParams
 from qwen_vl_utils import process_vision_info
 
 # 本地模型路径 - 需要先下载模型到此路径
-MODEL_PATH = "/Users/wang/model_engine/Qwen2.5-VL-7B-Instruct"
+MODEL_PATH = "./Qwen2.5-VL-7B-Instruct"
 
 def download_model_with_modelscope():
     """
@@ -17,7 +17,7 @@ def download_model_with_modelscope():
         print("开始从ModelScope下载Qwen2.5-VL-7B-Instruct模型...")
         model_dir = snapshot_download(
             'Qwen/Qwen2.5-VL-7B-Instruct',
-            local_dir='/Users/wang/model_engine/Qwen2.5-VL-7B-Instruct',
+            local_dir=MODEL_PATH,
             revision='master'
         )
         print(f"模型已成功下载到: {model_dir}")
@@ -44,7 +44,7 @@ def download_model_with_hf_mirror():
         print("开始从HF镜像站下载Qwen2.5-VL-7B-Instruct模型...")
         model_dir = snapshot_download(
             repo_id="Qwen/Qwen2.5-VL-7B-Instruct",
-            local_dir="/Users/wang/model_engine/Qwen2.5-VL-7B-Instruct",
+            local_dir=MODEL_PATH,
             resume_download=True
         )
         print(f"模型已成功下载到: {model_dir}")
@@ -69,7 +69,7 @@ def download_model_with_git_lfs():
         subprocess.run(["git", "lfs", "install"], check=True)
         
         # 克隆模型仓库
-        model_path = "/Users/wang/model_engine/Qwen2.5-VL-7B-Instruct"
+        model_path = MODEL_PATH
         if not os.path.exists(model_path):
             os.makedirs(model_path)
             
