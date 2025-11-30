@@ -1,10 +1,82 @@
+import os
+# 设置环境变量来解决OpenMP冲突问题
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+# 可选：关闭TensorFlow的oneDNN优化来减少警告信息
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
 import torch
-from transformers import AutoProcessor
-from vllm import LLM, SamplingParams
-from qwen_vl_utils import process_vision_info
+from transformers import AutoProcessor, AutoModelForVision2Seq
+from PIL import Image
+import requests
+from io import BytesIO
 
 # 本地模型路径 - 需要先下载模型到此路径
 MODEL_PATH = "./Qwen2.5-VL-7B-Instruct"
+
+# 手动实现 process_vision_info 函数
+def process_vision_info(conversations, return_video_kwargs=False):
+    """Extract vision info from conversations."""
+    def extract_vision_info(conversations):
+        vision_infos = []
+        if isinstance(conversations, list) and len(conversations) > 0:
+            if isinstance(conversations[0], dict):
+                # Single conversation
+                messages = conversations
+            elif isinstance(conversations[0], list):
+                # Batch of conversations
+                messages = conversations[0]
+            else:
+                messages = conversations
+                
+            for msg in messages:
+                if isinstance(msg, dict) and "content" in msg:
+                    content = msg["content"]
+                    if isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict) and ("image" in item or "image_url" in item or "video" in item):
+                                vision_infos.append(item)
+        return vision_infos
+    
+    def fetch_image(vision_info):
+        if "image" in vision_info:
+            image_source = vision_info["image"]
+        elif "image_url" in vision_info:
+            image_source = vision_info["image_url"]
+        else:
+            return None
+            
+        if isinstance(image_source, str):
+            if image_source.startswith("http"):
+                # URL image
+                response = requests.get(image_source)
+                image = Image.open(BytesIO(response.content)).convert("RGB")
+            else:
+                # Local file
+                image = Image.open(image_source).convert("RGB")
+        elif isinstance(image_source, Image.Image):
+            image = image_source.convert("RGB")
+        else:
+            raise ValueError(f"Unsupported image source type: {type(image_source)}")
+            
+        return image
+    
+    vision_infos = extract_vision_info(conversations)
+    
+    image_inputs = []
+    
+    for vision_info in vision_infos:
+        if "image" in vision_info or "image_url" in vision_info:
+            try:
+                image_inputs.append(fetch_image(vision_info))
+            except Exception as e:
+                print(f"Error fetching image: {e}")
+        
+    if len(image_inputs) == 0:
+        image_inputs = None
+        
+    if return_video_kwargs:
+        return image_inputs, None, {}
+    return image_inputs, None
 
 def download_model_with_modelscope():
     """
@@ -92,20 +164,22 @@ def download_model_with_git_lfs():
         return None
 
 def main():
+    # 检查模型是否存在
+    import os
+    if not os.path.exists(MODEL_PATH):
+        print("模型不存在，请先下载模型！")
+        return
+    
     # 初始化模型和处理器
-    llm = LLM(
-        model=MODEL_PATH,
-        max_model_len=4096,
-        tensor_parallel_size=1,
-        quantization=None,
-        dtype=torch.bfloat16,
+    print("正在加载模型...")
+    model = AutoModelForVision2Seq.from_pretrained(
+        MODEL_PATH,
+        torch_dtype=torch.bfloat16,
+        device_map="auto"
     )
     processor = AutoProcessor.from_pretrained(MODEL_PATH)
 
-    sampling_params = SamplingParams(
-        max_tokens=512
-    )
-
+    # 准备输入数据
     image_messages = [
         {"role": "system", "content": "You are a helpful assistant."},
         {
@@ -114,8 +188,6 @@ def main():
                 {
                     "type": "image",
                     "image": "https://modelscope.oss-cn-beijing.aliyuncs.com/resource/qwen.png",
-                    "min_pixels": 224 * 224,
-                    "max_pixels": 1280 * 28 * 28,
                 },
                 {"type": "text", "text": "Please provide a detailed description of this image"},
             ],
@@ -124,27 +196,37 @@ def main():
 
     messages = image_messages
 
-    prompt = processor.apply_chat_template(
+    # 处理图像
+    image_inputs, _ = process_vision_info(messages)
+
+    # 应用聊天模板
+    text = processor.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True,
     )
 
-    image_inputs, _, _ = process_vision_info(messages, return_video_kwargs=True)
+    # 准备模型输入
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        padding=True,
+        return_tensors="pt",
+    )
+    inputs = inputs.to(model.device)
 
-    mm_data = {}
-    if image_inputs is not None:
-        mm_data["image"] = image_inputs
-
-    llm_inputs = {
-        "prompt": prompt,
-        "multi_modal_data": mm_data,
-    }
-
-    outputs = llm.generate([llm_inputs], sampling_params=sampling_params)
-    generated_text = outputs[0].outputs[0].text
-
-    print(generated_text)
+    # 生成输出
+    print("正在生成描述...")
+    generated_ids = model.generate(**inputs, max_new_tokens=512)
+    generated_ids_trimmed = [
+        out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+    ]
+    output_text = processor.batch_decode(
+        generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+    )
+    
+    print("生成结果:")
+    print(output_text[0])
 
 if __name__ == "__main__":
     # 首先检查模型是否已存在
